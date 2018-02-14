@@ -134,7 +134,7 @@ drawitem(struct item *item, int x, int y, int w)
 static void
 drawmenu(void)
 {
-	unsigned int curpos;
+	static char _textwcursor[BUFSIZ];
 	struct item *item;
 	int x = 0, y = 0, fh = drw->fonts->h, w;
 
@@ -147,14 +147,9 @@ drawmenu(void)
 	}
 	/* draw input field */
 	w = (lines > 0 || !matches) ? mw - x : inputw;
+	sprintf(_textwcursor, "%s_", text);
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0);
-
-	drw_font_getexts(drw->fonts, text, cursor, &curpos, NULL);
-	if ((curpos += lrpad / 2 - 1) < w) {
-		drw_setscheme(drw, scheme[SchemeNorm]);
-		drw_rect(drw, x + curpos, 2 + (bh-fh)/2, 2, fh - 4, 1, 0);
-	}
+	drw_text(drw, x, 0, w, bh, lrpad / 2, _textwcursor, 0);
 
 	if (lines > 0) {
 		/* draw vertical list */
