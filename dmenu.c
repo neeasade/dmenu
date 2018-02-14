@@ -638,6 +638,8 @@ setup(void)
 	Window w, dw, *dws;
 	XWindowAttributes wa;
 	XClassHint ch = {"dmenu", "dmenu"};
+	XSizeHints *sh = NULL;
+	XWMHints wmh = {.flags = InputHint, .input = 1};
 #ifdef XINERAMA
 	XineramaScreenInfo *info;
 	Window pw;
@@ -699,6 +701,13 @@ setup(void)
 	inputw = MIN(inputw, mw/3);
 	match();
 
+	/* create size hints */
+	sh = XAllocSizeHints();
+	sh->flags = PSize | PMaxSize | PMinSize | PPosition;
+	sh->x = x; sh->y = y;
+	sh->width = sh->max_width = sh->min_width = mw;
+	sh->height = sh->max_width = sh->min_width = mh;
+
 	/* create menu window */
 	swa.override_redirect = override_redirect ? True : False;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
@@ -707,6 +716,8 @@ setup(void)
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
 	XSetClassHint(dpy, win, &ch);
+	XSetWMProperties(dpy, win, NULL, NULL, NULL, 0, sh, &wmh, &ch);
+	XFree(sh);
 
 	/* open input methods */
 	xim = XOpenIM(dpy, NULL, NULL, NULL);
