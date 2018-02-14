@@ -48,6 +48,7 @@ static struct item *items = NULL;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
+static int resized = 0; /* whether the window has been resized already */
 
 static Atom clip, utf8;
 static Display *dpy;
@@ -624,6 +625,17 @@ run(void)
 			if (ev.xvisibility.state != VisibilityUnobscured)
 				XRaiseWindow(dpy, win);
 			break;
+		case ConfigureNotify:
+			if (!resized && (ev.xconfigure.width != mw || ev.xconfigure.height != mh)) {
+				/* attempt to resize window to maintain drw sizes */
+				XMoveResizeWindow(dpy, win,
+						ev.xconfigure.x,
+						ev.xconfigure.y,
+						mw, mh);
+				resized = 1;
+				drawmenu();
+			}
+			break;
 		}
 	}
 }
@@ -711,7 +723,8 @@ setup(void)
 	/* create menu window */
 	swa.override_redirect = override_redirect ? True : False;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
-	swa.event_mask = ExposureMask | KeyPressMask | VisibilityChangeMask;
+	swa.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask |
+		VisibilityChangeMask;
 	win = XCreateWindow(dpy, parentwin, x, y, mw, mh, 0,
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
