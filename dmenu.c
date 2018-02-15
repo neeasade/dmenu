@@ -38,7 +38,6 @@ struct item {
 };
 
 static char text[BUFSIZ] = "";
-static char *embed;
 static int bh, mw, mh;
 static int dmx = 0; /* put dmenu at this x offset */
 static int dmy = 0; /* put dmenu at this y offset (measured from the bottom if topbar is 0) */
@@ -49,8 +48,9 @@ static size_t cursor;
 static struct item *items;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
-static int screen;
 static int currevert;
+static const char *prompt;
+static const char worddelimiters[] = " ";
 
 // flag variables
 static uint_fast8_t topbar = 1;            // dmenu starts at the top
@@ -77,14 +77,12 @@ static const char *colors[SchemeLast][2] = {
 	[SchemeCur]  = { "#656565", "#ffffff" },
 };
 
-static const char *prompt;
-static const char worddelimiters[] = " ";
-
 // Xlib related stuff
 static Display *dpy;
-static Window rootW, parentW, dmenuW, focusW;
+static Window rootW, dmenuW, focusW;
 static Atom clipA, utf8A;
 static XIC xic;
+static int screen;
 
 // drawable struct and colorscheme array
 static Drw *drw;
@@ -251,7 +249,7 @@ grabkeyboard(void)
 	struct timespec ts = { .tv_sec = 0, .tv_nsec = 1000000  };
 	int i;
 
-	if (embed || !override_redirect)
+	if (!override_redirect)
 		return;
 	/* try to grab keyboard, we may have to wait for another process to ungrab */
 	for (i = 0; i < 1000; i++) {
@@ -697,11 +695,9 @@ run(void)
 static void
 setup(void)
 {
-	int x, y, i, j;
-	unsigned int du;
+	int x, y, j;
 	XSetWindowAttributes swa;
 	XIM xim;
-	Window w, dw, *dws;
 	XWindowAttributes wa;
 	XClassHint ch = {"dmenu", "dmenu"};
 	XSizeHints *sh = NULL;
@@ -721,9 +717,9 @@ setup(void)
 	mh = (lines + 1) * bh;
 
 	{
-		if (!XGetWindowAttributes(dpy, parentW, &wa))
+		if (!XGetWindowAttributes(dpy, rootW, &wa))
 			die("could not get embedding window attributes: 0x%lx",
-			    parentW);
+			    rootW);
 		x = dmx;
 		y = topbar ? dmy : wa.height - mh - dmy;
 		mw = (dmw>0 ? dmw : wa.width);
@@ -745,7 +741,7 @@ setup(void)
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask |
 		VisibilityChangeMask | FocusChangeMask;
-	dmenuW = XCreateWindow(dpy, parentW, x, y, mw, mh, 0,
+	dmenuW = XCreateWindow(dpy, rootW, x, y, mw, mh, 0,
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
 	XSetClassHint(dpy, dmenuW, &ch);
@@ -760,15 +756,6 @@ setup(void)
 	XMapRaised(dpy, dmenuW);
 	if (override_redirect)
 		XSetInputFocus(dpy, dmenuW, RevertToParent, CurrentTime);
-	if (embed) {
-		XSelectInput(dpy, parentW, FocusChangeMask);
-		if (XQueryTree(dpy, parentW, &dw, &w, &dws, &du) && dws) {
-			for (i = 0; i < du && dws[i] != dmenuW; ++i)
-				XSelectInput(dpy, dws[i], FocusChangeMask);
-			XFree(dws);
-		}
-		grabfocus();
-	}
 	drw_resize(drw, mw, mh);
 	drawmenu();
 }
@@ -833,8 +820,6 @@ main(int argc, char *argv[])
 			colors[SchemeSel][ColFg] = argv[++i];
 		else if (!strcmp(argv[i], "-cc"))  /* cursor color */
 			colors[SchemeCur][ColFg] = argv[++i];
-		else if (!strcmp(argv[i], "-w"))   /* embedding window id */
-			embed = argv[++i];
 		else
 			usage();
 
@@ -844,16 +829,19 @@ main(int argc, char *argv[])
 		fputs("warning: no locale modifiers support\n", stderr);
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("cannot open display");
+
 	screen = DefaultScreen(dpy);
 	rootW = RootWindow(dpy, screen);
-	if (!embed || !(parentW = strtol(embed, NULL, 0)))
-		parentW = rootW;
-	if (!XGetWindowAttributes(dpy, parentW, &wa))
+
+	if (!XGetWindowAttributes(dpy, rootW, &wa))
 		die("could not get embedding window attributes: 0x%lx",
-		    parentW);
+		    rootW);
+
 	drw = drw_create(dpy, screen, rootW, wa.width, wa.height);
+
 	if (!drw_fontset_create(drw, fonts, (fontcount > 0 ? fontcount : 3)))
 		die("no fonts could be loaded.");
+
 	lrpad = drw->fonts->h;
 
 	/* focus mangling when override_redirect is set */
