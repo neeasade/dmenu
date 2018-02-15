@@ -1,7 +1,9 @@
 /* See LICENSE file for copyright and license details. */
+
 #include <ctype.h>
 #include <locale.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,10 +50,16 @@ static struct item *items = NULL;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
-static int resized = 0; /* whether the window has been resized already */
-static int focused = 0;
 static int fontcount = 0; /* number of fonts */
 static int currevert;
+
+// flag variables
+static uint_fast8_t topbar = 1;            // dmenu starts at the top
+static uint_fast8_t fuzzy = 1;             // use fuzzy matching
+static uint_fast8_t fast = 0;              // grab keyboard before stdin
+static uint_fast8_t override_redirect = 1; // set the override redirect flag
+static uint_fast8_t resized = 0;           // the dmenu window was resized already
+static uint_fast8_t focused = 0;           // the dmenu window has focus
 
 static Atom clip, utf8;
 static Display *dpy;
@@ -793,7 +801,7 @@ int
 main(int argc, char *argv[])
 {
 	XWindowAttributes wa;
-	int i, fast = 0;
+	int i;
 
 	for (i = 1; i < argc; i++)
 		/* these options take no arguments */
