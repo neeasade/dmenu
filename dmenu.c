@@ -46,7 +46,7 @@ static unsigned int dmw = 0; /* make dmenu this wide */
 static int inputw = 0, promptw;
 static int lrpad; /* sum of left and right padding */
 static size_t cursor;
-static struct item *items = NULL;
+static struct item *items;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int screen;
@@ -81,7 +81,7 @@ static const char *prompt;
 static const char worddelimiters[] = " ";
 
 // Xlib related stuff
-static Display *dpy = NULL;
+static Display *dpy;
 static Window rootW, parentW, dmenuW, focusW;
 static Atom clipA, utf8A;
 static XIC xic;
