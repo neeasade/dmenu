@@ -26,7 +26,7 @@
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
 
 /* enums */
-enum { SchemeNorm, SchemeSel, SchemeOut, SchemeLast }; /* color schemes */
+enum { SchemeNorm, SchemeSel, SchemeOut, SchemeCur, SchemeLast }; /* color schemes */
 
 struct item {
 	char *text;
@@ -163,6 +163,9 @@ drawmenu(void)
 	/* draw input field */
 	w = (lines > 0 || !matches) ? mw - x : inputw;
 	drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0);
+
+	/* draw cursor */
+	drw_setscheme(drw, scheme[SchemeCur]);
 	drw_rect(drw, x + cx + lrpad / 2, (bh - fh)/2, cw, fh,
 			text[cursor] == '\0' && focused, 0);
 
@@ -829,6 +832,8 @@ main(int argc, char *argv[])
 			colors[SchemeSel][ColBg] = argv[++i];
 		else if (!strcmp(argv[i], "-sf"))  /* selected foreground color */
 			colors[SchemeSel][ColFg] = argv[++i];
+		else if (!strcmp(argv[i], "-cc"))  /* cursor color */
+			colors[SchemeCur][ColFg] = argv[++i];
 		else if (!strcmp(argv[i], "-w"))   /* embedding window id */
 			embed = argv[++i];
 		else
