@@ -13,22 +13,22 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
-#ifdef XINERAMA
-#include <X11/extensions/Xinerama.h>
-#endif
 #include <X11/Xft/Xft.h>
 
 #include "drw.h"
 #include "util.h"
 
 /* macros */
-#define INTERSECT(x,y,w,h,r)  (MAX(0, MIN((x)+(w),(r).x_org+(r).width)  - MAX((x),(r).x_org)) \
-                             * MAX(0, MIN((y)+(h),(r).y_org+(r).height) - MAX((y),(r).y_org)))
-#define LENGTH(X)             (sizeof X / sizeof X[0])
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
 
-/* enums */
-enum { SchemeNorm, SchemeSel, SchemeOut, SchemeCur, SchemeLast }; /* color schemes */
+// possible colorschemes
+enum {
+	SchemeNorm, // normal colorscheme
+	SchemeSel,  // selection colorscheme
+	SchemeOut,  // I don't really know what this is for
+	SchemeCur,  // cursor colorscheme
+	SchemeLast,
+};
 
 struct item {
 	char *text;
@@ -49,8 +49,7 @@ static size_t cursor;
 static struct item *items = NULL;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
-static int mon = -1, screen;
-static int fontcount = 0; /* number of fonts */
+static int screen;
 static int currevert;
 
 // flag variables
@@ -61,15 +60,35 @@ static uint_fast8_t override_redirect = 1; // set the override redirect flag
 static uint_fast8_t resized = 0;           // the dmenu window was resized already
 static uint_fast8_t focused = 0;           // the dmenu window has focus
 
-static Atom clip, utf8;
-static Display *dpy;
-static Window root, parentwin, win, prevfocus;
+static uint_fast16_t lines;                // lines for a vertical listing
+static uint_fast16_t lineheight;           // minimum height for a line
+
+static uint_fast8_t fontcount;             // used when setting fonts manually
+static const char *fonts[BUFSIZ] = {       // these are used otherwise
+	"DejaVu Sans Mono:size=9",
+	"IPAGothic:size=10",
+	"Unifont:size=9",
+};
+
+static const char *colors[SchemeLast][2] = {
+	[SchemeNorm] = { "#000000", "#ffffff" },
+	[SchemeSel]  = { "#000000", "#c0c0c0" },
+	[SchemeOut]  = { "#000000", "#00ffff" },
+	[SchemeCur]  = { "#656565", "#ffffff" },
+};
+
+static const char *prompt;
+static const char worddelimiters[] = " ";
+
+// Xlib related stuff
+static Display *dpy = NULL;
+static Window rootW, parentW, dmenuW, focusW;
+static Atom clipA, utf8A;
 static XIC xic;
 
+// drawable struct and colorscheme array
 static Drw *drw;
 static Clr *scheme[SchemeLast];
-
-#include "config.h"
 
 static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
 static char *(*fstrstr)(const char *, const char *) = strstr;
@@ -110,7 +129,7 @@ cleanup(void)
 {
 	size_t i;
 
-	XUngrabKey(dpy, AnyKey, AnyModifier, root);
+	XUngrabKey(dpy, AnyKey, AnyModifier, rootW);
 	for (i = 0; i < SchemeLast; i++)
 		free(scheme[i]);
 	drw_free(drw);
@@ -118,7 +137,7 @@ cleanup(void)
 
 	/* give focus back to the previously focused window */
 	if (override_redirect)
-		XSetInputFocus(dpy, prevfocus, currevert, CurrentTime);
+		XSetInputFocus(dpy, focusW, currevert, CurrentTime);
 
 	XCloseDisplay(dpy);
 }
@@ -206,7 +225,7 @@ drawmenu(void)
 			drw_text(drw, mw - w, 0, w, bh, lrpad / 2, ">", 0);
 		}
 	}
-	drw_map(drw, win, 0, 0, mw, mh);
+	drw_map(drw, dmenuW, 0, 0, mw, mh);
 }
 
 static void
@@ -218,9 +237,9 @@ grabfocus(void)
 
 	for (i = 0; i < 100; ++i) {
 		XGetInputFocus(dpy, &focuswin, &revertwin);
-		if (focuswin == win)
+		if (focuswin == dmenuW)
 			return;
-		XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+		XSetInputFocus(dpy, dmenuW, RevertToParent, CurrentTime);
 		nanosleep(&ts, NULL);
 	}
 	die("cannot grab focus");
@@ -451,8 +470,8 @@ keypress(XKeyEvent *ev)
 			break;
 		case XK_y: /* paste selection */
 		case XK_Y:
-			XConvertSelection(dpy, (ev->state & ShiftMask) ? clip : XA_PRIMARY,
-			                  utf8, utf8, win, CurrentTime);
+			XConvertSelection(dpy, (ev->state & ShiftMask) ? clipA : XA_PRIMARY,
+			                  utf8A, utf8A, dmenuW, CurrentTime);
 			return;
 		case XK_Return:
 		case XK_KP_Enter:
@@ -587,8 +606,8 @@ paste(void)
 	Atom da;
 
 	/* we have been given the current selection, now insert it into input */
-	if (XGetWindowProperty(dpy, win, utf8, 0, (sizeof text / 4) + 1, False,
-	                   utf8, &da, &di, &dl, &dl, (unsigned char **)&p)
+	if (XGetWindowProperty(dpy, dmenuW, utf8A, 0, (sizeof text / 4) + 1, False,
+	                   utf8A, &da, &di, &dl, &dl, (unsigned char **)&p)
 	    == Success && p) {
 		insert(p, (q = strchr(p, '\n')) ? q - p : (ssize_t)strlen(p));
 		XFree(p);
@@ -636,7 +655,7 @@ run(void)
 		switch(ev.type) {
 		case Expose:
 			if (ev.xexpose.count == 0)
-				drw_map(drw, win, 0, 0, mw, mh);
+				drw_map(drw, dmenuW, 0, 0, mw, mh);
 			break;
 		case FocusOut:
 			focused = 0;
@@ -646,24 +665,24 @@ run(void)
 			focused = 1;
 			drawmenu();
 			/* regrab focus from parent window */
-			if (ev.xfocus.window != win)
+			if (ev.xfocus.window != dmenuW)
 				grabfocus();
 			break;
 		case KeyPress:
 			keypress(&ev.xkey);
 			break;
 		case SelectionNotify:
-			if (ev.xselection.property == utf8)
+			if (ev.xselection.property == utf8A)
 				paste();
 			break;
 		case VisibilityNotify:
 			if (override_redirect && ev.xvisibility.state != VisibilityUnobscured)
-				XRaiseWindow(dpy, win);
+				XRaiseWindow(dpy, dmenuW);
 			break;
 		case ConfigureNotify:
 			if (!resized && (ev.xconfigure.width != mw || ev.xconfigure.height != mh)) {
 				/* attempt to resize window to maintain drw sizes */
-				XMoveResizeWindow(dpy, win,
+				XMoveResizeWindow(dpy, dmenuW,
 						ev.xconfigure.x,
 						ev.xconfigure.y,
 						mw, mh);
@@ -687,63 +706,29 @@ setup(void)
 	XClassHint ch = {"dmenu", "dmenu"};
 	XSizeHints *sh = NULL;
 	XWMHints wmh = {.flags = InputHint, .input = 1};
-#ifdef XINERAMA
-	XineramaScreenInfo *info;
-	Window pw;
-	int a, di, n, area = 0;
-#endif
+
 	/* init appearance */
 	for (j = 0; j < SchemeLast; j++)
 		scheme[j] = drw_scm_create(drw, colors[j], 2);
 
-	clip = XInternAtom(dpy, "CLIPBOARD",   False);
-	utf8 = XInternAtom(dpy, "UTF8_STRING", False);
+	clipA = XInternAtom(dpy, "CLIPBOARD",   False);
+	utf8A = XInternAtom(dpy, "UTF8_STRING", False);
 
 	/* calculate menu geometry */
 	bh = drw->fonts->h + 2;
 	bh = MAX(bh,lineheight);	/* make a menu line AT LEAST 'lineheight' tall */
 	lines = MAX(lines, 0);
 	mh = (lines + 1) * bh;
-#ifdef XINERAMA
-	i = 0;
-	if (parentwin == root && (info = XineramaQueryScreens(dpy, &n))) {
-		XGetInputFocus(dpy, &w, &di);
-		if (mon >= 0 && mon < n)
-			i = mon;
-		else if (w != root && w != PointerRoot && w != None) {
-			/* find top-level window containing current input focus */
-			do {
-				if (XQueryTree(dpy, (pw = w), &dw, &w, &dws, &du) && dws)
-					XFree(dws);
-			} while (w != root && w != pw);
-			/* find xinerama screen with which the window intersects most */
-			if (XGetWindowAttributes(dpy, pw, &wa))
-				for (j = 0; j < n; j++)
-					if ((a = INTERSECT(wa.x, wa.y, wa.width, wa.height, info[j])) > area) {
-						area = a;
-						i = j;
-					}
-		}
-		/* no focused window is on screen, so use pointer location instead */
-		if (mon < 0 && !area && XQueryPointer(dpy, root, &dw, &dw, &x, &y, &di, &di, &du))
-			for (i = 0; i < n; i++)
-				if (INTERSECT(x, y, 1, 1, info[i]))
-					break;
 
-		x = info[i].x_org + dmx;
-		y = info[i].y_org + (topbar ? dmy : info[i].height - mh - dmy);
-		mw = (dmw>0 ? dmw : info[i].width);
-		XFree(info);
-	} else
-#endif
 	{
-		if (!XGetWindowAttributes(dpy, parentwin, &wa))
+		if (!XGetWindowAttributes(dpy, parentW, &wa))
 			die("could not get embedding window attributes: 0x%lx",
-			    parentwin);
+			    parentW);
 		x = dmx;
 		y = topbar ? dmy : wa.height - mh - dmy;
 		mw = (dmw>0 ? dmw : wa.width);
 	}
+
 	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
 	inputw = MIN(inputw, mw/3);
 	match();
@@ -760,25 +745,25 @@ setup(void)
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask |
 		VisibilityChangeMask | FocusChangeMask;
-	win = XCreateWindow(dpy, parentwin, x, y, mw, mh, 0,
+	dmenuW = XCreateWindow(dpy, parentW, x, y, mw, mh, 0,
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
-	XSetClassHint(dpy, win, &ch);
-	XSetWMProperties(dpy, win, NULL, NULL, NULL, 0, sh, &wmh, &ch);
+	XSetClassHint(dpy, dmenuW, &ch);
+	XSetWMProperties(dpy, dmenuW, NULL, NULL, NULL, 0, sh, &wmh, &ch);
 	XFree(sh);
 
 	/* open input methods */
 	xim = XOpenIM(dpy, NULL, NULL, NULL);
 	xic = XCreateIC(xim, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
-	                XNClientWindow, win, XNFocusWindow, win, NULL);
+	                XNClientWindow, dmenuW, XNFocusWindow, dmenuW, NULL);
 
-	XMapRaised(dpy, win);
+	XMapRaised(dpy, dmenuW);
 	if (override_redirect)
-		XSetInputFocus(dpy, win, RevertToParent, CurrentTime);
+		XSetInputFocus(dpy, dmenuW, RevertToParent, CurrentTime);
 	if (embed) {
-		XSelectInput(dpy, parentwin, FocusChangeMask);
-		if (XQueryTree(dpy, parentwin, &dw, &w, &dws, &du) && dws) {
-			for (i = 0; i < du && dws[i] != win; ++i)
+		XSelectInput(dpy, parentW, FocusChangeMask);
+		if (XQueryTree(dpy, parentW, &dw, &w, &dws, &du) && dws) {
+			for (i = 0; i < du && dws[i] != dmenuW; ++i)
 				XSelectInput(dpy, dws[i], FocusChangeMask);
 			XFree(dws);
 		}
@@ -791,7 +776,7 @@ setup(void)
 static void
 usage(void)
 {
-	fputs("usage: dmenu [-bfiv] [-l lines] [-p prompt] [-fn font] [-m monitor]\n"
+	fputs("usage: dmenu [-bfiv] [-l lines] [-p prompt] [-fn font]\n"
 	      "             [-h height] [-x xoffset] [-y yoffset] [-w width]\n"
 	      "             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]\n", stderr);
 	exit(1);
@@ -830,8 +815,6 @@ main(int argc, char *argv[])
 			dmy = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-w"))   /* make dmenu this wide */
 			dmw = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-m"))
-			mon = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-p"))   /* adds prompt to left of input field */
 			prompt = argv[++i];
 		else if (!strcmp(argv[i], "-fn"))  /* font or font set */
@@ -862,20 +845,20 @@ main(int argc, char *argv[])
 	if (!(dpy = XOpenDisplay(NULL)))
 		die("cannot open display");
 	screen = DefaultScreen(dpy);
-	root = RootWindow(dpy, screen);
-	if (!embed || !(parentwin = strtol(embed, NULL, 0)))
-		parentwin = root;
-	if (!XGetWindowAttributes(dpy, parentwin, &wa))
+	rootW = RootWindow(dpy, screen);
+	if (!embed || !(parentW = strtol(embed, NULL, 0)))
+		parentW = rootW;
+	if (!XGetWindowAttributes(dpy, parentW, &wa))
 		die("could not get embedding window attributes: 0x%lx",
-		    parentwin);
-	drw = drw_create(dpy, screen, root, wa.width, wa.height);
-	if (!drw_fontset_create(drw, fonts, (fontcount > 0 ? fontcount : 1)))
+		    parentW);
+	drw = drw_create(dpy, screen, rootW, wa.width, wa.height);
+	if (!drw_fontset_create(drw, fonts, (fontcount > 0 ? fontcount : 3)))
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
 
 	/* focus mangling when override_redirect is set */
 	if (override_redirect)
-		XGetInputFocus(dpy, &prevfocus, &currevert);
+		XGetInputFocus(dpy, &focusW, &currevert);
 
 	if (fast) {
 		grabkeyboard();
