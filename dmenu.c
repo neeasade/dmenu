@@ -51,10 +51,11 @@ static int mon = -1, screen;
 static int resized = 0; /* whether the window has been resized already */
 static int focused = 0;
 static int fontcount = 0; /* number of fonts */
+static int currevert;
 
 static Atom clip, utf8;
 static Display *dpy;
-static Window root, parentwin, win;
+static Window root, parentwin, win, prevfocus;
 static XIC xic;
 
 static Drw *drw;
@@ -106,6 +107,11 @@ cleanup(void)
 		free(scheme[i]);
 	drw_free(drw);
 	XSync(dpy, False);
+
+	/* give focus back to the previously focused window */
+	if (override_redirect)
+		XSetInputFocus(dpy, prevfocus, currevert, CurrentTime);
+
 	XCloseDisplay(dpy);
 }
 
@@ -858,6 +864,10 @@ main(int argc, char *argv[])
 	if (!drw_fontset_create(drw, fonts, (fontcount > 0 ? fontcount : 1)))
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
+
+	/* focus mangling when override_redirect is set */
+	if (override_redirect)
+		XGetInputFocus(dpy, &prevfocus, &currevert);
 
 	if (fast) {
 		grabkeyboard();
