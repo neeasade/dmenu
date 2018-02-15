@@ -49,6 +49,7 @@ static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
 static int resized = 0; /* whether the window has been resized already */
+static int focused = 0;
 
 static Atom clip, utf8;
 static Display *dpy;
@@ -134,9 +135,10 @@ drawitem(struct item *item, int x, int y, int w)
 static void
 drawmenu(void)
 {
-	static char _textwcursor[BUFSIZ];
+	static char _curbuf[BUFSIZ];
 	struct item *item;
-	int x = 0, y = 0, fh = drw->fonts->h, w;
+	int x = 0, y = 0, fh = drw->fonts->h, w, cx, cw;
+	long _utfcp;
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
 	drw_rect(drw, 0, 0, mw, mh, 1, 1);
@@ -145,11 +147,24 @@ drawmenu(void)
 		drw_setscheme(drw, scheme[SchemeSel]);
 		x = drw_text(drw, x, 0, promptw, bh, lrpad / 2, prompt, 0);
 	}
+
+	/* prepare the cursor */
+	memset(_curbuf, 0, BUFSIZ);
+	if (text[cursor] == '\0')
+		_curbuf[0] = '_';
+	else
+		strncpy(_curbuf, text + cursor, utf8decode(text + cursor, &_utfcp, 4));
+	cw = drw_fontset_getwidth(drw, _curbuf);
+
+	memset(_curbuf, 0, BUFSIZ);
+	strncpy(_curbuf, text, cursor);
+	cx = drw_fontset_getwidth(drw, _curbuf);
+
 	/* draw input field */
 	w = (lines > 0 || !matches) ? mw - x : inputw;
-	sprintf(_textwcursor, "%s_", text);
-	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_text(drw, x, 0, w, bh, lrpad / 2, _textwcursor, 0);
+	drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0);
+	drw_rect(drw, x + cx + lrpad / 2, (bh - fh)/2, cw, fh,
+			text[cursor] == '\0' && focused, 0);
 
 	if (lines > 0) {
 		/* draw vertical list */
@@ -604,7 +619,13 @@ run(void)
 			if (ev.xexpose.count == 0)
 				drw_map(drw, win, 0, 0, mw, mh);
 			break;
+		case FocusOut:
+			focused = 0;
+			drawmenu();
+			break;
 		case FocusIn:
+			focused = 1;
+			drawmenu();
 			/* regrab focus from parent window */
 			if (ev.xfocus.window != win)
 				grabfocus();
@@ -719,7 +740,7 @@ setup(void)
 	swa.override_redirect = override_redirect ? True : False;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask |
-		VisibilityChangeMask;
+		VisibilityChangeMask | FocusChangeMask;
 	win = XCreateWindow(dpy, parentwin, x, y, mw, mh, 0,
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
