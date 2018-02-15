@@ -649,7 +649,7 @@ run(void)
 				paste();
 			break;
 		case VisibilityNotify:
-			if (ev.xvisibility.state != VisibilityUnobscured)
+			if (override_redirect && ev.xvisibility.state != VisibilityUnobscured)
 				XRaiseWindow(dpy, win);
 			break;
 		case ConfigureNotify:
