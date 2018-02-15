@@ -50,6 +50,7 @@ static struct item *prev, *curr, *next, *sel;
 static int mon = -1, screen;
 static int resized = 0; /* whether the window has been resized already */
 static int focused = 0;
+static int fontcount = 0; /* number of fonts */
 
 static Atom clip, utf8;
 static Display *dpy;
@@ -819,7 +820,7 @@ main(int argc, char *argv[])
 		else if (!strcmp(argv[i], "-p"))   /* adds prompt to left of input field */
 			prompt = argv[++i];
 		else if (!strcmp(argv[i], "-fn"))  /* font or font set */
-			fonts[0] = argv[++i];
+			fonts[fontcount++] = argv[++i];
 		else if(!strcmp(argv[i], "-h")) { /* minimum height of one menu line */
 			lineheight = atoi(argv[++i]);
 			lineheight = MAX(lineheight,8); /* reasonable default in case of value too small/negative */
@@ -853,7 +854,7 @@ main(int argc, char *argv[])
 		die("could not get embedding window attributes: 0x%lx",
 		    parentwin);
 	drw = drw_create(dpy, screen, root, wa.width, wa.height);
-	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
+	if (!drw_fontset_create(drw, fonts, (fontcount > 0 ? fontcount : 1)))
 		die("no fonts could be loaded.");
 	lrpad = drw->fonts->h;
 
