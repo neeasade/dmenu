@@ -21,13 +21,32 @@
 /* macros */
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
 
-// possible colorschemes
 enum {
 	SchemeNorm, // normal colorscheme
 	SchemeSel,  // selection colorscheme
 	SchemeOut,  // I don't really know what this is for
 	SchemeCur,  // cursor colorscheme
 	SchemeLast,
+};
+
+enum {                        // refer to hasharg()
+	FuzzyMatchingOpt = 5,     // -F
+	OverrideRedirectOpt = 14, // -O
+	BottomOfScreenOpt = 33,   // -b
+	FastOpt = 37,             // -f
+	LineHeightOpt = 39,       // -h
+	CaseOpt = 40,             // -i
+	LinesOpt = 43,            // -l
+	PromptOpt = 47,           // -p
+	WidthOpt = 54,            // -w
+	XOffsetOpt = 55,          // -x
+	YOffsetOpt = 56,          // -y
+	CurFgOpt = 102,           // -cc
+	NormBgOpt = 111,          // -nb
+	SelBgOpt = 116,           // -sb
+	NormFgOpt = 119,          // -nf
+	SelFgOpt = 124,           // -sf
+	FontOpt = 127,            // -fn
 };
 
 struct item {
@@ -38,30 +57,30 @@ struct item {
 };
 
 static char text[BUFSIZ] = "";
-static int bh, mw, mh;
-static int dmx = 0; /* put dmenu at this x offset */
-static int dmy = 0; /* put dmenu at this y offset (measured from the bottom if topbar is 0) */
-static unsigned int dmw = 0; /* make dmenu this wide */
-static int inputw = 0, promptw;
-static int lrpad; /* sum of left and right padding */
 static size_t cursor;
+
+static const char *prompt;
+
+static uint_fast16_t menux, menuy, menuw, menuh, menuwusr;
+static uint_fast16_t inputw, promptw;
+static uint_fast16_t lineh;
+static uint_fast16_t lrpad;
+
 static struct item *items;
 static struct item *matches, *matchend;
 static struct item *prev, *curr, *next, *sel;
-static int currevert;
-static const char *prompt;
+
 static const char worddelimiters[] = " ";
 
-// flag variables
 static uint_fast8_t topbar = 1;            // dmenu starts at the top
 static uint_fast8_t fuzzy = 1;             // use fuzzy matching
 static uint_fast8_t fast = 0;              // grab keyboard before stdin
 static uint_fast8_t override_redirect = 1; // set the override redirect flag
-static uint_fast8_t resized = 0;           // the dmenu window was resized already
-static uint_fast8_t focused = 0;           // the dmenu window has focus
+static uint_fast8_t resized = 0;           // dmenu window was already resized
+static uint_fast8_t focused = 0;           // dmenu window has focus
 
 static uint_fast16_t lines;                // lines for a vertical listing
-static uint_fast16_t lineheight;           // minimum height for a line
+static uint_fast16_t linehusr;             // user specified minimum line height
 
 static uint_fast8_t fontcount;             // used when setting fonts manually
 static const char *fonts[BUFSIZ] = {       // these are used otherwise
@@ -77,14 +96,13 @@ static const char *colors[SchemeLast][2] = {
 	[SchemeCur]  = { "#656565", "#ffffff" },
 };
 
-// Xlib related stuff
 static Display *dpy;
 static Window rootW, dmenuW, focusW;
 static Atom clipA, utf8A;
 static XIC xic;
 static int screen;
+static int currevert;
 
-// drawable struct and colorscheme array
 static Drw *drw;
 static Clr *scheme[SchemeLast];
 
@@ -110,15 +128,15 @@ calcoffsets(void)
 	int i, n;
 
 	if (lines > 0)
-		n = lines * bh;
+		n = lines * lineh;
 	else
-		n = mw - (promptw + inputw + TEXTW("<") + TEXTW(">"));
+		n = menuw - (promptw + inputw + TEXTW("<") + TEXTW(">"));
 	/* calculate which items will begin the next page and previous page */
 	for (i = 0, next = curr; next; next = next->right)
-		if ((i += (lines > 0) ? bh : MIN(TEXTW(next->text), n)) > n)
+		if ((i += (lines > 0) ? lineh : MIN(TEXTW(next->text), n)) > n)
 			break;
 	for (i = 0, prev = curr; prev && prev->left; prev = prev->left)
-		if ((i += (lines > 0) ? bh : MIN(TEXTW(prev->left->text), n)) > n)
+		if ((i += (lines > 0) ? lineh : MIN(TEXTW(prev->left->text), n)) > n)
 			break;
 }
 
@@ -161,7 +179,7 @@ drawitem(struct item *item, int x, int y, int w)
 	else
 		drw_setscheme(drw, scheme[SchemeNorm]);
 
-	return drw_text(drw, x, y, w, bh, lrpad / 2, item->text, 0);
+	return drw_text(drw, x, y, w, lineh, lrpad / 2, item->text, 0);
 }
 
 static void
@@ -173,11 +191,11 @@ drawmenu(void)
 	long _utfcp;
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_rect(drw, 0, 0, mw, mh, 1, 1);
+	drw_rect(drw, 0, 0, menuw, menuh, 1, 1);
 
 	if (prompt && *prompt) {
 		drw_setscheme(drw, scheme[SchemeSel]);
-		x = drw_text(drw, x, 0, promptw, bh, lrpad / 2, prompt, 0);
+		x = drw_text(drw, x, 0, promptw, lineh, lrpad / 2, prompt, 0);
 	}
 
 	/* prepare the cursor */
@@ -193,37 +211,37 @@ drawmenu(void)
 	cx = drw_fontset_getwidth(drw, _curbuf);
 
 	/* draw input field */
-	w = (lines > 0 || !matches) ? mw - x : inputw;
+	w = (lines > 0 || !matches) ? menuw - x : inputw;
 	drw_setscheme(drw, scheme[SchemeNorm]);
-	drw_text(drw, x, 0, w, bh, lrpad / 2, text, 0);
+	drw_text(drw, x, 0, w, lineh, lrpad / 2, text, 0);
 
 	/* draw cursor */
 	drw_setscheme(drw, scheme[SchemeCur]);
-	drw_rect(drw, x + cx + lrpad / 2, (bh - fh)/2, cw, fh,
+	drw_rect(drw, x + cx + lrpad / 2, (lineh - fh)/2, cw, fh,
 			text[cursor] == '\0' && focused, 0);
 
 	if (lines > 0) {
 		/* draw vertical list */
 		for (item = curr; item != next; item = item->right)
-			drawitem(item, x, y += bh, mw - x);
+			drawitem(item, x, y += lineh, menuw - x);
 	} else if (matches) {
 		/* draw horizontal list */
 		x += inputw;
 		w = TEXTW("<");
 		if (curr->left) {
 			drw_setscheme(drw, scheme[SchemeNorm]);
-			drw_text(drw, x, 0, w, bh, lrpad / 2, "<", 0);
+			drw_text(drw, x, 0, w, lineh, lrpad / 2, "<", 0);
 		}
 		x += w;
 		for (item = curr; item != next; item = item->right)
-			x = drawitem(item, x, 0, MIN(TEXTW(item->text), mw - x - TEXTW(">")));
+			x = drawitem(item, x, 0, MIN(TEXTW(item->text), menuw - x - TEXTW(">")));
 		if (next) {
 			w = TEXTW(">");
 			drw_setscheme(drw, scheme[SchemeNorm]);
-			drw_text(drw, mw - w, 0, w, bh, lrpad / 2, ">", 0);
+			drw_text(drw, menuw - w, 0, w, lineh, lrpad / 2, ">", 0);
 		}
 	}
-	drw_map(drw, dmenuW, 0, 0, mw, mh);
+	drw_map(drw, dmenuW, 0, 0, menuw, menuh);
 }
 
 static void
@@ -653,7 +671,7 @@ run(void)
 		switch(ev.type) {
 		case Expose:
 			if (ev.xexpose.count == 0)
-				drw_map(drw, dmenuW, 0, 0, mw, mh);
+				drw_map(drw, dmenuW, 0, 0, menuw, menuh);
 			break;
 		case FocusOut:
 			focused = 0;
@@ -678,12 +696,12 @@ run(void)
 				XRaiseWindow(dpy, dmenuW);
 			break;
 		case ConfigureNotify:
-			if (!resized && (ev.xconfigure.width != mw || ev.xconfigure.height != mh)) {
+			if (!resized && (ev.xconfigure.width != menuw || ev.xconfigure.height != menuh)) {
 				/* attempt to resize window to maintain drw sizes */
 				XMoveResizeWindow(dpy, dmenuW,
 						ev.xconfigure.x,
 						ev.xconfigure.y,
-						mw, mh);
+						menuw, menuh);
 				resized = 1;
 				drawmenu();
 			}
@@ -711,37 +729,37 @@ setup(void)
 	utf8A = XInternAtom(dpy, "UTF8_STRING", False);
 
 	/* calculate menu geometry */
-	bh = drw->fonts->h + 2;
-	bh = MAX(bh,lineheight);	/* make a menu line AT LEAST 'lineheight' tall */
+	lineh = drw->fonts->h + 2;
+	lineh = MAX(lineh,linehusr);	/* make a menu line AT LEAST 'linehusr' tall */
 	lines = MAX(lines, 0);
-	mh = (lines + 1) * bh;
+	menuh = (lines + 1) * lineh;
 
 	{
 		if (!XGetWindowAttributes(dpy, rootW, &wa))
 			die("could not get embedding window attributes: 0x%lx",
 			    rootW);
-		x = dmx;
-		y = topbar ? dmy : wa.height - mh - dmy;
-		mw = (dmw>0 ? dmw : wa.width);
+		x = menux;
+		y = topbar ? menuy : wa.height - menuh - menuy;
+		menuw = (menuwusr>0 ? menuwusr : wa.width);
 	}
 
 	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
-	inputw = MIN(inputw, mw/3);
+	inputw = MIN(inputw, menuw/3);
 	match();
 
 	/* create size hints */
 	sh = XAllocSizeHints();
 	sh->flags = PSize | PMaxSize | PMinSize | PPosition;
 	sh->x = x; sh->y = y;
-	sh->width = sh->max_width = sh->min_width = mw;
-	sh->height = sh->max_width = sh->min_width = mh;
+	sh->width = sh->max_width = sh->min_width = menuw;
+	sh->height = sh->max_width = sh->min_width = menuh;
 
 	/* create menu window */
 	swa.override_redirect = override_redirect ? True : False;
 	swa.background_pixel = scheme[SchemeNorm][ColBg].pixel;
 	swa.event_mask = StructureNotifyMask | ExposureMask | KeyPressMask |
 		VisibilityChangeMask | FocusChangeMask;
-	dmenuW = XCreateWindow(dpy, rootW, x, y, mw, mh, 0,
+	dmenuW = XCreateWindow(dpy, rootW, x, y, menuw, menuh, 0,
 	                    CopyFromParent, CopyFromParent, CopyFromParent,
 	                    CWOverrideRedirect | CWBackPixel | CWEventMask, &swa);
 	XSetClassHint(dpy, dmenuW, &ch);
@@ -756,17 +774,20 @@ setup(void)
 	XMapRaised(dpy, dmenuW);
 	if (override_redirect)
 		XSetInputFocus(dpy, dmenuW, RevertToParent, CurrentTime);
-	drw_resize(drw, mw, mh);
+	drw_resize(drw, menuw, menuh);
 	drawmenu();
 }
 
-static void
-usage(void)
+static uint_fast8_t
+hasharg(const char *arg)
 {
-	fputs("usage: dmenu [-bfiv] [-l lines] [-p prompt] [-fn font]\n"
-	      "             [-h height] [-x xoffset] [-y yoffset] [-w width]\n"
-	      "             [-nb color] [-nf color] [-sb color] [-sf color] [-w windowid]\n", stderr);
-	exit(1);
+	uint_fast8_t hash = 0;
+	uint_fast8_t i = 0;
+
+	for (; arg[i] != '\0'; ++i)
+		hash += (i + 1) * (arg[i] - 'A');
+
+	return hash;
 }
 
 int
@@ -775,53 +796,35 @@ main(int argc, char *argv[])
 	XWindowAttributes wa;
 	int i;
 
-	for (i = 1; i < argc; i++)
-		/* these options take no arguments */
-		if (!strcmp(argv[i], "-v")) {      /* prints version information */
-			puts("dmenu-"VERSION);
-			exit(0);
-		} else if (!strcmp(argv[i], "-b")) /* appears at the bottom of the screen */
-			topbar = 0;
-		else if (!strcmp(argv[i], "-f"))   /* grabs keyboard before reading stdin */
-			fast = 1;
-		else if (!strcmp(argv[i], "-F"))   /* grabs keyboard before reading stdin */
-			fuzzy = 0;
-		else if (!strcmp(argv[i], "-or")) /* don't set Override Redirect */
-			override_redirect = 0;
-		else if (!strcmp(argv[i], "-i")) { /* case-insensitive item matching */
-			fstrncmp = strncasecmp;
-			fstrstr = cistrstr;
-		} else if (i + 1 == argc)
-			usage();
-		/* these options take one argument */
-		else if (!strcmp(argv[i], "-l"))   /* number of lines in vertical list */
-			lines = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-x"))   /* window x offset */
-			dmx = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-y"))   /* window y offset (from bottom up if -b) */
-			dmy = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-w"))   /* make dmenu this wide */
-			dmw = atoi(argv[++i]);
-		else if (!strcmp(argv[i], "-p"))   /* adds prompt to left of input field */
-			prompt = argv[++i];
-		else if (!strcmp(argv[i], "-fn"))  /* font or font set */
-			fonts[fontcount++] = argv[++i];
-		else if(!strcmp(argv[i], "-h")) { /* minimum height of one menu line */
-			lineheight = atoi(argv[++i]);
-			lineheight = MAX(lineheight,8); /* reasonable default in case of value too small/negative */
+	for (i = 1; i < argc; ++i) {
+		if (argv[i][0] != '-')
+			die("not an option");
+
+		switch (hasharg(argv[i] + 1)) {
+			case FuzzyMatchingOpt: fuzzy = 0; break;
+			case OverrideRedirectOpt: override_redirect = 0; break;
+			case BottomOfScreenOpt: topbar = 0; break;
+			case FastOpt: fast = 1; break;
+			case LinesOpt: lines = atoi(argv[++i]); break;
+			case PromptOpt: prompt = argv[++i]; break;
+			case WidthOpt: menuwusr = atoi(argv[++i]); break;
+			case XOffsetOpt: menux = atoi(argv[++i]); break;
+			case YOffsetOpt: menuy = atoi(argv[++i]); break;
+			case CurFgOpt: colors[SchemeCur][ColFg] = argv[++i]; break;
+			case NormBgOpt: colors[SchemeNorm][ColBg] = argv[++i]; break;
+			case NormFgOpt: colors[SchemeNorm][ColFg] = argv[++i]; break;
+			case SelBgOpt: colors[SchemeSel][ColBg] = argv[++i]; break;
+			case SelFgOpt: colors[SchemeSel][ColFg] = argv[++i]; break;
+			case FontOpt: fonts[fontcount++] = argv[++i]; break;
+			case CaseOpt: fstrncmp = strncasecmp; fstrstr = cistrstr; break;
+			case LineHeightOpt:
+				linehusr = atoi(argv[++i]);
+				linehusr = MAX(linehusr,8);
+				break;
+			default:
+				die("bad option: %s", argv[i]);
 		}
-		else if (!strcmp(argv[i], "-nb"))  /* normal background color */
-			colors[SchemeNorm][ColBg] = argv[++i];
-		else if (!strcmp(argv[i], "-nf"))  /* normal foreground color */
-			colors[SchemeNorm][ColFg] = argv[++i];
-		else if (!strcmp(argv[i], "-sb"))  /* selected background color */
-			colors[SchemeSel][ColBg] = argv[++i];
-		else if (!strcmp(argv[i], "-sf"))  /* selected foreground color */
-			colors[SchemeSel][ColFg] = argv[++i];
-		else if (!strcmp(argv[i], "-cc"))  /* cursor color */
-			colors[SchemeCur][ColFg] = argv[++i];
-		else
-			usage();
+	}
 
 	if (!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fputs("warning: no locale support\n", stderr);
@@ -860,3 +863,5 @@ main(int argc, char *argv[])
 
 	return 1; /* unreachable */
 }
+
+// vim: set tabstop=4 shiftwidth=4 :
