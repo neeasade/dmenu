@@ -18,7 +18,7 @@
 #include "drw.h"
 #include "util.h"
 
-/* macros */
+/* macros TODO: get rid of this */
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
 
 enum {
@@ -56,6 +56,30 @@ struct item {
 	double distance;
 };
 
+/* function prototypes */
+static void fuzzymatch(void);
+static void match(void);
+static void cleanup(void);
+static void calcoffsets(void);
+static void drawmenu(void);
+static void setup(void);
+static void grabfocus(void);
+static void grabkeyboard(void);
+static void paste(void);
+static void readstdin(void);
+static void run(void);
+
+static void appenditem(struct item *, struct item **, struct item **);
+static void insert(const char *, ssize_t);
+static void keypress(XKeyEvent *);
+
+static int drawitem(struct item *, int, int, int);
+static int compare_distance(const void *, const void *);
+static size_t nextrune(int);
+
+static char *cistrstr(const char *, const char *);
+
+/* global variables */
 static char text[BUFSIZ] = "";
 static size_t cursor;
 
@@ -73,7 +97,6 @@ static struct item *prev, *curr, *next, *sel;
 static const char worddelimiters[] = " ";
 
 static uint_fast8_t topbar = 1;            // dmenu starts at the top
-static uint_fast8_t fuzzy = 1;             // use fuzzy matching
 static uint_fast8_t fast = 0;              // grab keyboard before stdin
 static uint_fast8_t override_redirect = 1; // set the override redirect flag
 static uint_fast8_t resized = 0;           // dmenu window was already resized
@@ -108,6 +131,7 @@ static Clr *scheme[SchemeLast];
 
 static int (*fstrncmp)(const char *, const char *, size_t) = strncmp;
 static char *(*fstrstr)(const char *, const char *) = strstr;
+static void (*fmatch)(void) = fuzzymatch;
 
 static void
 appenditem(struct item *item, struct item **list, struct item **last)
@@ -166,6 +190,7 @@ cistrstr(const char *s, const char *sub)
 	for (len = strlen(sub); *s; s++)
 		if (!strncasecmp(s, sub, len))
 			return (char *)s;
+
 	return NULL;
 }
 
@@ -279,7 +304,7 @@ grabkeyboard(void)
 	die("cannot grab keyboard");
 }
 
-int
+static int
 compare_distance(const void *a, const void *b)
 {
 	struct item *da = *(struct item **) a;
@@ -293,7 +318,7 @@ compare_distance(const void *a, const void *b)
 	return da->distance == db->distance ? 0 : da->distance < db->distance ? -1 : 1;
 }
 
-void
+static void
 fuzzymatch(void)
 {
 	/* bang - we have so much memory */
@@ -363,10 +388,6 @@ fuzzymatch(void)
 static void
 match(void)
 {
-	if (fuzzy) {
-		fuzzymatch();
-		return;
-	}
 	static char **tokv = NULL;
 	static int tokn = 0;
 
@@ -428,7 +449,7 @@ insert(const char *str, ssize_t n)
 	if (n > 0)
 		memcpy(&text[cursor], str, n);
 	cursor += n;
-	match();
+	fmatch();
 }
 
 static size_t
@@ -473,7 +494,7 @@ keypress(XKeyEvent *ev)
 
 		case XK_k: /* delete right */
 			text[cursor] = '\0';
-			match();
+			fmatch();
 			break;
 		case XK_u: /* delete left */
 			insert(NULL, 0 - cursor);
@@ -607,7 +628,7 @@ keypress(XKeyEvent *ev)
 		strncpy(text, sel->text, sizeof text - 1);
 		text[sizeof text - 1] = '\0';
 		cursor = strlen(text);
-		match();
+		fmatch();
 		break;
 	}
 	drawmenu();
@@ -745,7 +766,7 @@ setup(void)
 
 	promptw = (prompt && *prompt) ? TEXTW(prompt) - lrpad / 4 : 0;
 	inputw = MIN(inputw, menuw/3);
-	match();
+	fmatch();
 
 	/* create size hints */
 	sh = XAllocSizeHints();
@@ -801,7 +822,7 @@ main(int argc, char *argv[])
 			die("not an option");
 
 		switch (hasharg(argv[i] + 1)) {
-			case FuzzyMatchingOpt: fuzzy = 0; break;
+			case FuzzyMatchingOpt: fmatch = match; break;
 			case OverrideRedirectOpt: override_redirect = 0; break;
 			case BottomOfScreenOpt: topbar = 0; break;
 			case FastOpt: fast = 1; break;
