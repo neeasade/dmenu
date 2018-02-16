@@ -17,6 +17,7 @@
 
 #include "drw.h"
 #include "util.h"
+#include "utf8.h"
 
 /* macros TODO: get rid of this */
 #define TEXTW(X)              (drw_fontset_getwidth(drw, (X)) + lrpad)
@@ -228,7 +229,7 @@ drawmenu(void)
 	if (text[cursor] == '\0')
 		_curbuf[0] = '_';
 	else
-		strncpy(_curbuf, text + cursor, utf8decode(text + cursor, &_utfcp, 4));
+		strncpy(_curbuf, text + cursor, utf8decode(text + cursor, &_utfcp));
 	cw = drw_fontset_getwidth(drw, _curbuf);
 
 	memset(_curbuf, 0, BUFSIZ);

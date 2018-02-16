@@ -3,7 +3,7 @@
 
 include config.mk
 
-SRC = drw.c dmenu.c stest.c util.c
+SRC = drw.c dmenu.c stest.c util.c utf8.c
 OBJ = ${SRC:.c=.o}
 
 all: options dmenu stest
@@ -20,9 +20,9 @@ options:
 
 ${OBJ}: arg.h config.mk drw.h
 
-dmenu: dmenu.o drw.o util.o
+dmenu: dmenu.o drw.o util.o utf8.o
 	@echo CC -o $@
-	@${CC} -o $@ dmenu.o drw.o util.o ${LDFLAGS}
+	@${CC} -o $@ $^ ${LDFLAGS}
 
 stest: stest.o
 	@echo CC -o $@
