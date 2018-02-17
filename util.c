@@ -1,10 +1,24 @@
 /* See LICENSE file for copyright and license details. */
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "util.h"
+
+char *
+cistrstr(const char *s, const char *sub)
+{
+	size_t len;
+
+	for (len = strlen(sub); *s; ++s) {
+		if (!strncasecmp(s, sub, len))
+			return (char *) s;
+	}
+
+	return NULL;
+}
 
 void *
 ecalloc(size_t nmemb, size_t size)

@@ -78,8 +78,6 @@ static int drawitem(struct item *, int, int, int);
 static int compare_distance(const void *, const void *);
 static size_t nextrune(int);
 
-static char *cistrstr(const char *, const char *);
-
 /* global variables */
 static char text[BUFSIZ] = "";
 static size_t cursor;
@@ -181,18 +179,6 @@ cleanup(void)
 		XSetInputFocus(dpy, focusW, currevert, CurrentTime);
 
 	XCloseDisplay(dpy);
-}
-
-static char *
-cistrstr(const char *s, const char *sub)
-{
-	size_t len;
-
-	for (len = strlen(sub); *s; s++)
-		if (!strncasecmp(s, sub, len))
-			return (char *)s;
-
-	return NULL;
 }
 
 static int
