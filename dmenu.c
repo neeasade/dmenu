@@ -451,17 +451,41 @@ nextrune(int inc)
 }
 
 static void
+movewordedge(int dir)
+{
+	if (dir < 0) { /* move cursor to the start of the word*/
+		while (cursor > 0 && strchr(worddelimiters, text[nextrune(-1)]))
+			cursor = nextrune(-1);
+		while (cursor > 0 && !strchr(worddelimiters, text[nextrune(-1)]))
+			cursor = nextrune(-1);
+	} else { /* move cursor to the end of the word */
+		while (text[cursor] && strchr(worddelimiters, text[cursor]))
+			cursor = nextrune(+1);
+		while (text[cursor] && !strchr(worddelimiters, text[cursor]))
+			cursor = nextrune(+1);
+	}
+}
+
+static void
 keypress(XKeyEvent *ev)
 {
 	char buf[32];
 	int len;
-	KeySym ksym = NoSymbol;
+	KeySym ksym;
 	Status status;
 
 	len = XmbLookupString(xic, ev, buf, sizeof buf, &ksym, &status);
-	if (status == XBufferOverflow)
+	switch (status) {
+	default: /* XLookupNone, XBufferOverflow */
 		return;
-	if (ev->state & ControlMask)
+	case XLookupChars:
+		goto insert;
+	case XLookupKeySym:
+	case XLookupBoth:
+		break;
+	}
+
+	if (ev->state & ControlMask) {
 		switch(ksym) {
 		case XK_a: ksym = XK_Home;      break;
 		case XK_b: ksym = XK_Left;      break;
@@ -497,6 +521,12 @@ keypress(XKeyEvent *ev)
 			XConvertSelection(dpy, (ev->state & ShiftMask) ? clipA : XA_PRIMARY,
 			                  utf8A, utf8A, dmenuW, CurrentTime);
 			return;
+		case XK_Left:
+			movewordedge(-1);
+			goto draw;
+		case XK_Right:
+			movewordedge(+1);
+			goto draw;
 		case XK_Return:
 		case XK_KP_Enter:
 			break;
@@ -506,8 +536,14 @@ keypress(XKeyEvent *ev)
 		default:
 			return;
 		}
-	else if (ev->state & Mod1Mask)
+	} else if (ev->state & Mod1Mask) {
 		switch(ksym) {
+		case XK_b:
+			movewordedge(-1);
+			goto draw;
+		case XK_f:
+			movewordedge(+1);
+			goto draw;
 		case XK_g: ksym = XK_Home;  break;
 		case XK_G: ksym = XK_End;   break;
 		case XK_h: ksym = XK_Up;    break;
@@ -517,8 +553,11 @@ keypress(XKeyEvent *ev)
 		default:
 			return;
 		}
+	}
+
 	switch(ksym) {
 	default:
+insert:
 		if (!iscntrl(*buf))
 			insert(buf, len);
 		break;
@@ -618,6 +657,8 @@ keypress(XKeyEvent *ev)
 		fmatch();
 		break;
 	}
+
+draw:
 	drawmenu();
 }
 
