@@ -18,11 +18,11 @@ options:
 	@echo CC $<
 	@$(CC) -c $(CFLAGS) $<
 
-$(OBJ): arg.h config.h config.mk drw.h
+$(OBJ): arg.h config.mk drw.h
 
-dmenu: dmenu.o drw.o util.o
+dmenu: dmenu.o drw.o util.o utf8.o
 	@echo CC -o $@
-	@$(CC) -o $@ dmenu.o drw.o util.o $(LDFLAGS)
+	@$(CC) -o $@ $^ $(LDFLAGS)
 
 stest: stest.o
 	@echo CC -o $@
