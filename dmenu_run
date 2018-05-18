@@ -1,2 +1,11 @@
 #!/bin/sh
-dmenu_path | dmenu "$@" | ${SHELL:-"/bin/sh"} &
+choice=$(dmenu_path | dmenu "$@")
+
+if [[ -z "$choice" ]]; then
+	exit
+elif [[ "$choice" != *";"* ]]; then
+	eval "$choice 2>/dev/null >/dev/null &"
+	disown
+else
+	eval "$choice"
+fi
